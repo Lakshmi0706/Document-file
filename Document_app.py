@@ -4,7 +4,7 @@ import pandas as pd
 # Page setup
 st.set_page_config(page_title="Product Selector", layout="centered")
 
-# Custom CSS for full dropdown text, smaller image, and beauty
+# Custom CSS - wider dropdowns + full text support
 st.markdown("""
 <style>
     .big-font {
@@ -21,12 +21,20 @@ st.markdown("""
         margin-bottom: 5px;
         text-align: center;
     }
-    /* Force dropdowns to show full long text */
-    .stSelectbox > div > div > div {
+    /* Wider columns for dropdowns */
+    .block-container {
+        padding-top: 2rem;
+    }
+    /* Make each selectbox wider and show full text */
+    div.row-widget.stSelectbox {
+        min-width: 200px !important;
+    }
+    .stSelectbox > div > div {
         width: 100% !important;
     }
     select {
         width: 100% !important;
+        white-space: normal !important;
     }
     .product-info {
         font-size: 20px;
@@ -68,8 +76,8 @@ try:
     
     df = df.dropna(subset=['Department', 'Super category', 'Category', 'Subcategory', 'Segment'])
 
-    # Horizontal dropdowns
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # Wider horizontal dropdowns (more space per column)
+    col1, spacer1, col2, spacer2, col3, spacer3, col4, spacer4, col5 = st.columns([1.5, 0.2, 1.5, 0.2, 1.5, 0.2, 1.5, 0.2, 1.5])
 
     with col1:
         st.markdown('<p class="select-label">Department</p>', unsafe_allow_html=True)
@@ -108,14 +116,14 @@ try:
     else:
         row = result.iloc[0]
 
-        # Definition first
+        # Definition
         definition = row.get('Definition', None)
         if pd.notna(definition) and str(definition).strip():
             st.markdown('<div class="definition-text">', unsafe_allow_html=True)
             st.write(definition)
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # Default values (now shown!)
+        # Default values
         default_sub = row.get('Default values subcategory', None)
         default_seg = row.get('Default values segment', None)
         if pd.notna(default_sub) or pd.notna(default_seg):
@@ -127,7 +135,7 @@ try:
                 st.write(f"• Segment: {default_seg}")
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # Smaller centered image (450px - fits perfectly without scrolling)
+        # Image (450px - fits perfectly)
         image_url = row['Image']
         if pd.notna(image_url):
             image_url = str(image_url).strip()
@@ -136,7 +144,7 @@ try:
                 st.image(image_url, width=450)
                 st.markdown("</div>", unsafe_allow_html=True)
 
-        # Link at the bottom
+        # Link
         link = row['Link']
         if pd.notna(link):
             link = str(link).strip()
