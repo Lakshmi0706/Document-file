@@ -1,63 +1,49 @@
 import streamlit as st
 import pandas as pd
 
-# App title
 st.title("Product Selector")
 
-# Excel file name (exact match)
 EXCEL_FILE = "TRAIL DOC.xlsx"
 
 try:
-    # Load the Excel file
     df = pd.read_excel(EXCEL_FILE)
-
-    # Clean data: remove completely empty rows
     df = df.dropna(how='all')
-
-    # Required columns (exact names from your file)
+    
     required_columns = [
         'Department', 'Super category', 'Category', 'Subcategory', 'Segment',
         'Image', 'Link'
     ]
-
-    # Check if all required columns exist
+    
     missing_cols = [col for col in required_columns if col not in df.columns]
     if missing_cols:
         st.error(f"The Excel file is missing these required columns: {', '.join(missing_cols)}")
         st.stop()
-
-    # Remove rows with missing key values
+    
     df = df.dropna(subset=['Department', 'Super category', 'Category', 'Subcategory', 'Segment'])
 
-    # === Dropdowns in hierarchical order ===
-
-    # 1. Department
+    # Dropdowns
     departments = sorted(df['Department'].unique())
     selected_dept = st.selectbox("Select Department", departments)
 
-    # 2. Super category
     super_cats = sorted(df[df['Department'] == selected_dept]['Super category'].unique())
     selected_super = st.selectbox("Select Super Category", super_cats)
 
-    # 3. Category
     categories = sorted(df[(df['Department'] == selected_dept) & 
                            (df['Super category'] == selected_super)]['Category'].unique())
     selected_cat = st.selectbox("Select Category", categories)
 
-    # 4. Subcategory
     subcats = sorted(df[(df['Department'] == selected_dept) & 
                         (df['Super category'] == selected_super) & 
                         (df['Category'] == selected_cat)]['Subcategory'].unique())
     selected_subcat = st.selectbox("Select Subcategory", subcats)
 
-    # 5. Segment
     segments = sorted(df[(df['Department'] == selected_dept) & 
                          (df['Super category'] == selected_super) & 
                          (df['Category'] == selected_cat) & 
                          (df['Subcategory'] == selected_subcat)]['Segment'].unique())
     selected_segment = st.selectbox("Select Segment", segments)
 
-    # === Find the selected product ===
+    # Find product
     result = df[(df['Department'] == selected_dept) &
                 (df['Super category'] == selected_super) &
                 (df['Category'] == selected_cat) &
@@ -69,27 +55,34 @@ try:
     else:
         row = result.iloc[0]
 
-        # Display Image
+        # Improved Image Display
         image_url = row['Image']
-        if pd.notna(image_url) and str(image_url).strip() != "":
-            st.image(image_url, caption="Product Image", use_column_width=True)
+        if pd.notna(image_url):
+            image_url = str(image_url).strip()
+            if image_url:
+                try:
+                    st.image(image_url, caption="Product Image", use_column_width=True)
+                except Exception:
+                    st.error("Image could not be loaded (invalid or inaccessible URL).")
+            else:
+                st.info("No image URL provided.")
         else:
             st.info("No image available.")
 
-        # Display Link
+        # Link
         link = row['Link']
-        if pd.notna(link) and str(link).strip() != "":
-            st.markdown(f"*Product Link:* [{link}]({link})")
-        else:
-            st.info("No link provided.")
+        if pd.notna(link):
+            link = str(link).strip()
+            if link:
+                st.markdown(f"*Product Link:* [{link}]({link})")
 
-        # Display Definition (if available)
+        # Definition
         definition = row.get('Definition', None)
-        if pd.notna(definition) and str(definition).strip() != "":
+        if pd.notna(definition) and str(definition).strip():
             st.markdown("*Definition:*")
             st.write(definition)
 
-        # Optional: Show default values
+        # Default values
         default_sub = row.get('Default values subcategory', None)
         default_seg = row.get('Default values segment', None)
         if pd.notna(default_sub) or pd.notna(default_seg):
@@ -100,6 +93,6 @@ try:
                 st.write(f"- Segment: {default_seg}")
 
 except FileNotFoundError:
-    st.error(f"File '{EXCEL_FILE}' not found. Please ensure it's uploaded correctly.")
+    st.error(f"File '{EXCEL_FILE}' not found.")
 except Exception as e:
     st.error(f"An error occurred: {str(e)}")
