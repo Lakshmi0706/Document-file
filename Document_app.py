@@ -3,7 +3,7 @@ import pandas as pd
 
 st.set_page_config(page_title="Product Selector", layout="centered")
 
-# Compact modern CSS
+# Compact modern styling
 st.markdown("""
 <style>
     .big-font {
@@ -51,7 +51,7 @@ try:
     df = pd.read_excel(EXCEL_FILE)
     df = df.dropna(how='all')
 
-    # Exact column names - change if yours are different
+    # Exact column names - change only if yours are different
     dept_col = "Department"
     super_col = "Super category"
     cat_col = "Category"
@@ -77,16 +77,17 @@ try:
     col_names = [dept_col, super_col, cat_col, subcat_col, seg_col]
 
     selections = []
-    filtered_df = df
+    filtered_df = df.copy()
 
     for i, (label, col_name) in enumerate(zip(labels, col_names)):
         with cols[i]:
             st.markdown(f'<p class="label-style">{label}</p>', unsafe_allow_html=True)
-            options = sorted(filtered_df[col_name].dropna().unique())
-            if not options.empty:
+            options = sorted(filtered_df[col_name].dropna().unique().tolist())
+            if options:  # Fixed: check if list is not empty
                 selected = st.selectbox("", options, key=f"select_{i}", label_visibility="collapsed")
             else:
                 selected = None
+                st.selectbox("", ["No options"], disabled=True, key=f"select_{i}", label_visibility="collapsed")
             selections.append(selected)
             if selected is not None:
                 filtered_df = filtered_df[filtered_df[col_name] == selected]
@@ -96,26 +97,22 @@ try:
     else:
         row = filtered_df.iloc[0]
 
-        # Always show Definition section
+        # Always show Definition
         definition = row.get(def_col)
         if pd.notna(definition) and str(definition).strip():
             st.markdown(f'<div class="definition">{definition}</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="placeholder">No definition provided.</div>', unsafe_allow_html=True)
 
-        # Always show Default Values section
+        # Always show Default Values
         default_sub = row.get(default_sub_col)
         default_seg = row.get(default_seg_col)
         st.markdown('<div class="default-values">', unsafe_allow_html=True)
         st.markdown("*Default Values:*")
-        if pd.notna(default_sub) and str(default_sub).strip():
-            st.write(f"• Subcategory: {default_sub}")
-        else:
-            st.write("• Subcategory: Not specified")
-        if pd.notna(default_seg) and str(default_seg).strip():
-            st.write(f"• Segment: {default_seg}")
-        else:
-            st.write("• Segment: Not specified")
+        sub_text = default_sub if pd.notna(default_sub) and str(default_sub).strip() else "Not specified"
+        seg_text = default_seg if pd.notna(default_seg) and str(default_seg).strip() else "Not specified"
+        st.write(f"• Subcategory: {sub_text}")
+        st.write(f"• Segment: {seg_text}")
         st.markdown('</div>', unsafe_allow_html=True)
 
         # Image
@@ -136,6 +133,6 @@ try:
             st.markdown('<div class="placeholder">No product link provided.</div>', unsafe_allow_html=True)
 
 except FileNotFoundError:
-    st.error("Excel file 'TRAIL DOC.xlsx' not found.")
+    st.error(f"File '{EXCEL_FILE}' not found in the repository.")
 except Exception as e:
     st.error(f"Error loading data: {str(e)}")
