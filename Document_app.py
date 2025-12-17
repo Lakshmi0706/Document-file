@@ -4,7 +4,7 @@ import pandas as pd
 # Page setup
 st.set_page_config(page_title="Product Selector", layout="centered")
 
-# Custom CSS for better look and full-width dropdowns
+# Custom CSS for full dropdown text, smaller image, and beauty
 st.markdown("""
 <style>
     .big-font {
@@ -21,17 +21,17 @@ st.markdown("""
         margin-bottom: 5px;
         text-align: center;
     }
-    /* Make dropdowns full width and show long text */
-    .stSelectbox > div > div > select {
+    /* Force dropdowns to show full long text */
+    .stSelectbox > div > div > div {
         width: 100% !important;
     }
-    .stSelectbox > div > div {
+    select {
         width: 100% !important;
     }
     .product-info {
         font-size: 20px;
         line-height: 1.6;
-        margin: 30px 0;
+        margin: 20px 0;
         text-align: center;
         font-weight: bold;
     }
@@ -41,6 +41,12 @@ st.markdown("""
         text-align: center;
         font-style: italic;
         color: #34495E;
+    }
+    .default-values {
+        font-size: 16px;
+        margin: 15px 0;
+        text-align: center;
+        color: #27AE60;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -62,7 +68,7 @@ try:
     
     df = df.dropna(subset=['Department', 'Super category', 'Category', 'Subcategory', 'Segment'])
 
-    # Horizontal dropdowns (equal width, full text visible)
+    # Horizontal dropdowns
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
@@ -102,23 +108,35 @@ try:
     else:
         row = result.iloc[0]
 
-        # Definition first (above image)
+        # Definition first
         definition = row.get('Definition', None)
         if pd.notna(definition) and str(definition).strip():
             st.markdown('<div class="definition-text">', unsafe_allow_html=True)
             st.write(definition)
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # Large centered image
+        # Default values (now shown!)
+        default_sub = row.get('Default values subcategory', None)
+        default_seg = row.get('Default values segment', None)
+        if pd.notna(default_sub) or pd.notna(default_seg):
+            st.markdown('<div class="default-values">', unsafe_allow_html=True)
+            st.markdown("*Default Values:*")
+            if pd.notna(default_sub):
+                st.write(f"• Subcategory: {default_sub}")
+            if pd.notna(default_seg):
+                st.write(f"• Segment: {default_seg}")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # Smaller centered image (450px - fits perfectly without scrolling)
         image_url = row['Image']
         if pd.notna(image_url):
             image_url = str(image_url).strip()
             if image_url.startswith('http'):
-                st.markdown("<div style='text-align: center; margin: 30px 0;'>", unsafe_allow_html=True)
-                st.image(image_url, width=600)  # Big and clear
+                st.markdown("<div style='text-align: center; margin: 20px 0;'>", unsafe_allow_html=True)
+                st.image(image_url, width=450)
                 st.markdown("</div>", unsafe_allow_html=True)
 
-        # Link below image
+        # Link at the bottom
         link = row['Link']
         if pd.notna(link):
             link = str(link).strip()
