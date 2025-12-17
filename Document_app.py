@@ -24,26 +24,45 @@ except Exception:
 # ---------- App Config ----------
 st.set_page_config(page_title="Product Catalog Viewer", layout="wide")
 st.title("📘 Product Catalog Viewer")
-st.caption("Upload an Excel file, map columns, then select Module → Sub-Category → Segment → Product to view image and definition.")
+st.caption(
+    "Upload an Excel file, map columns, then select Module → Sub-Category → Segment → Product to view image and definition."
+)
 
 # ---------- Constants ----------
 ROLES = ["Module", "SubCategory", "Segment", "ProductName", "Definition", "Image"]
 
 # ---------- Helpers ----------
-def load_excel(uploaded_file, sheet_name=None) -> pd.DataFrame:
+@st.cache_data(show_spinner=False)
+def load_excel(uploaded_file, sheet_name: Optional[str] = None) -> pd.DataFrame:
     """
-    Load Excel (.xlsx) using openpyxl.
+    Load Excel using openpyxl for .xlsx and xlrd for .xls when available.
     If sheet_name is provided, read that sheet; else first sheet.
     """
     if uploaded_file is None:
         return pd.DataFrame()
 
     try:
-        xls = pd.ExcelFile(uploaded_file, engine="openpyxl")
+        file_name = getattr(uploaded_file, "name", "")
+        ext = os.path.splitext(file_name)[1].lower()
+
+        # Choose engine by extension
+        if ext == ".xls":
+            # xlrd is required for .xls (older Excel). If not installed, show a friendly error.
+            try:
+                xls = pd.ExcelFile(uploaded_file, engine="xlrd")
+            except Exception as e:
+                raise RuntimeError("Reading .xls requires xlrd. Please install xlrd or upload a .xlsx file.") from e
+        else:
+            xls = pd.ExcelFile(uploaded_file, engine="openpyxl")
+
         sheets = xls.sheet_names
+        if not sheets:
+            return pd.DataFrame()
+
         if sheet_name is None or sheet_name not in sheets:
             sheet_name = sheets[0]  # default to first sheet
-        df = pd.read_excel(xls, sheet_name=sheet_name, engine="openpyxl")
+
+        df = pd.read_excel(xls, sheet_name=sheet_name)
         df.columns = [str(c).strip() for c in df.columns]
         return df
     except Exception as e:
@@ -55,7 +74,7 @@ def suggest_mapping(df_cols):
     """
     Lightweight auto-suggest for column mapping based on column names.
     """
-    lower = {c.lower(): c for c in df_cols}
+    lower = {str(c).lower(): str(c) for c in df_cols}
 
     def pick(*cands):
         for c in cands:
@@ -65,197 +84,218 @@ def suggest_mapping(df_cols):
 
     return {
         "Module":      pick("module", "category", "division"),
-        "SubCategory": pick("subcategory", "sub_category", "sub cat", "subcat"),
-        "Segment":     pick("segment", "subsegment", "sub_segment"),
-        "ProductName": pick("productname", "product_name", "name", "item", "sku"),
-        "Definition":  pick("definition", "description", "details", "spec", "narration"),
-        "Image":       pick("image", "imagepath", "image_path", "imageurl", "image_url", "picture", "img"),
+        "SubCategory": pick("subcategory", "sub-category", "sub category", "subcat"),
+        "Segment":     pick("segment", "subsegment", "sub-segment"),
+        "ProductName": pick("productname", "product name", "product", "name"),
+        "Definition":  pick("definition", "desc", "description"),
+        "Image":       pick("image", "imageurl", "image url", "img", "photo", "picture", "image_path"),
     }
 
 
-def validate_mapping(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> bool:
+@st.cache_data(show_spinner=False)
+def load_image(img_ref: str) -> Optional[Image.Image]:
     """
-    Ensure all roles are mapped to existing columns.
+    Load an image from a local path or URL.
+    Returns PIL Image or None if fails.
     """
-    missing = [role for role, col in mapping.items() if (col is None or col not in df.columns)]
-    if missing:
-        st.error(f"Missing mapped columns: {', '.join(missing)}")
-        return False
-    return True
-
-
-def read_image(ref: str) -> Optional[Image.Image]:
-    """
-    Load image from a local path or a URL.
-    Returns a PIL Image or None if it fails.
-
-    Correct try/except blocks are used to avoid SyntaxError.
-    """
-    if not ref:
+    if not img_ref:
         return None
 
-    ref = str(ref).strip()
+    img_ref = str(img_ref).strip()
+    try:
+        # URL case
+        if img_ref.lower().startswith(("http://", "https://")) and REQUESTS_AVAILABLE:
+            resp = requests.get(img_ref, timeout=10)
+            resp.raise_for_status()
+            return Image.open(io.BytesIO(resp.content)).convert("RGB")
 
-    # --- Case 1: URL image ---
-    if ref.lower().startswith(("http://", "https://")):
-        if not REQUESTS_AVAILABLE:
-            st.warning("Install `requests` (add to requirements.txt) to load images from URLs.")
-            return None
+        # Local file case
+        if os.path.exists(img_ref):
+            return Image.open(img_ref).convert("RGB")
+
+    except Exception:
+        return None
+    return None
+
+
+def chain_select(df: pd.DataFrame, mapping: Dict[str, str]):
+    """
+    Render cascaded selectors: Module -> SubCategory -> Segment -> ProductName
+    Returns filtered dataframe and the current selection dict.
+    """
+    sel: Dict[str, str] = {}
+
+    mod_col = mapping.get("Module")
+    sub_col = mapping.get("SubCategory")
+    seg_col = mapping.get("Segment")
+    prod_col = mapping.get("ProductName")
+
+    # Module
+    if mod_col and mod_col in df.columns:
+        modules = sorted([str(x) for x in df[mod_col].dropna().unique()])
+        sel["Module"] = st.selectbox("Module", options=["(All)"] + modules, index=0)
+        df = df if sel["Module"] == "(All)" else df[df[mod_col].astype(str) == sel["Module"]]
+
+    # SubCategory
+    if sub_col and sub_col in df.columns:
+        subs = sorted([str(x) for x in df[sub_col].dropna().unique()])
+        sel["SubCategory"] = st.selectbox("Sub-Category", options=["(All)"] + subs, index=0)
+        df = df if sel["SubCategory"] == "(All)" else df[df[sub_col].astype(str) == sel["SubCategory"]]
+
+    # Segment
+    if seg_col and seg_col in df.columns:
+        segs = sorted([str(x) for x in df[seg_col].dropna().unique()])
+        sel["Segment"] = st.selectbox("Segment", options=["(All)"] + segs, index=0)
+        df = df if sel["Segment"] == "(All)" else df[df[seg_col].astype(str) == sel["Segment"]]
+
+    # ProductName
+    if prod_col and prod_col in df.columns:
+        prods = sorted([str(x) for x in df[prod_col].dropna().unique()])
+        sel["ProductName"] = st.selectbox("Product", options=["(All)"] + prods, index=0)
+        df = df if sel["ProductName"] == "(All)" else df[df[prod_col].astype(str) == sel["ProductName"]]
+
+    return df, sel
+
+
+def show_product_card(row: pd.Series, mapping: Dict[str, str]):
+    """
+    Show image (if available) and definition for a single product row.
+    """
+    img_col = mapping.get("Image")
+    def_col = mapping.get("Definition")
+    prod_col = mapping.get("ProductName")
+
+    product_name = str(row.get(prod_col, "")) if prod_col else ""
+    definition = str(row.get(def_col, "")) if def_col else ""
+    img_ref = str(row.get(img_col, "")) if img_col else ""
+
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        img = load_image(img_ref)
+        if img:
+            st.image(img, caption=product_name or "Image", use_column_width=True)
+        else:
+            st.info("No image or failed to load image for this item.")
+
+    with c2:
+        st.subheader(product_name or "Unnamed Product")
+        st.markdown(definition or "_No definition provided._")
+
+
+# ---------- UI: Upload ----------
+uploaded_file = st.file_uploader(
+    "Upload Excel file (.xlsx or .xls)",
+    type=["xlsx", "xls"],
+    accept_multiple_files=False,
+    help="Supported: Excel .xlsx (openpyxl) and .xls (xlrd)."
+)
+
+if uploaded_file is None:
+    st.warning("Please upload an Excel file to begin.")
+    st.stop()
+
+# ---------- UI: Sheet Selection ----------
+try:
+    # Use the same engine logic as load_excel for listing sheets
+    file_name = getattr(uploaded_file, "name", "")
+    ext = os.path.splitext(file_name)[1].lower()
+
+    if ext == ".xls":
         try:
-            r = requests.get(ref, timeout=10)
-            r.raise_for_status()  # raise if not 200
-            return Image.open(io.BytesIO(r.content))
+            xls = pd.ExcelFile(uploaded_file, engine="xlrd")
         except Exception as e:
-            st.warning(f"Failed to fetch image URL: {ref}\nReason: {e}")
-            return None
+            st.error("Reading .xls requires xlrd. Please install xlrd or upload a .xlsx file.")
+            st.stop()
+    else:
+        xls = pd.ExcelFile(uploaded_file, engine="openpyxl")
 
-    # --- Case 2: Local file image ---
-    try:
-        # Resolve relative to app working directory
-        if not os.path.isabs(ref):
-            ref = os.path.join(os.getcwd(), ref)
-        if not os.path.exists(ref):
-            st.warning(f"Image path not found: {ref}")
-            return None
-        return Image.open(ref)
-    except Exception as e:
-        st.warning(f"Failed to open local image: {ref}\nReason: {e}")
-        return None
+    sheets = xls.sheet_names
+    if not sheets:
+        st.error("No sheets found in the uploaded file.")
+        st.stop()
 
-
-def product_card(row: pd.Series, mapping: Dict[str, str]) -> None:
-    """
-    Render a product card with image + definition + source fields.
-    """
-    prod = str(row.get(mapping["ProductName"], "") or "")
-    definition = str(row.get(mapping["Definition"], "") or "")
-    image_ref = str(row.get(mapping["Image"], "") or "")
-
-    with st.container(border=True):
-        left, right = st.columns([1, 2])
-        with left:
-            img = read_image(image_ref)
-            if img:
-                st.image(img, use_column_width=True)
-            else:
-                st.info("No image / failed to load.")
-
-        with right:
-            st.subheader(prod if prod else "Unnamed product")
-            if definition:
-                st.markdown(f"**Definition:** {definition}")
-            else:
-                st.markdown("_No definition provided_")
-
-            with st.expander("Source fields"):
-                st.code(f"Image: {image_ref}")
-                st.code(f"Module: {row.get(mapping['Module'], '')}")
-                st.code(f"Sub-Category: {row.get(mapping['SubCategory'], '')}")
-                st.code(f"Segment: {row.get(mapping['Segment'], '')}")
-
-
-# ---------- Sidebar: Upload & sheet selection ----------
-st.sidebar.header("1) Upload Excel")
-uploaded_xlsx = st.sidebar.file_uploader("Choose .xlsx file", type=["xlsx"])
-
-sheet_name = None
-if uploaded_xlsx is not None:
-    try:
-        xls = pd.ExcelFile(uploaded_xlsx, engine="openpyxl")
-        sheet_name = st.sidebar.selectbox("Sheet", options=xls.sheet_names, index=0)
-        # reset file pointer after reading sheet names
-        uploaded_xlsx.seek(0)
-    except Exception as e:
-        st.sidebar.warning(f"Could not list sheets: {e}")
-
-df = load_excel(uploaded_xlsx, sheet_name=sheet_name)
+    sheet_choice = st.selectbox("Select sheet", options=sheets, index=0)
+    df = pd.read_excel(xls, sheet_name=sheet_choice)
+    df.columns = [str(c).strip() for c in df.columns]
+except Exception as e:
+    st.error(f"Unable to read Excel sheets: {e}")
+    st.stop()
 
 if df.empty:
-    st.info("Upload your Excel from the sidebar to begin.")
+    st.error("Selected sheet is empty or failed to load.")
     st.stop()
 
-st.success(f"Excel loaded. Rows: {len(df)}")
-with st.expander("🔎 Preview (first 50 rows)"):
-    st.dataframe(df.head(50), use_container_width=True)
+# ---------- UI: Column Mapping ----------
+st.subheader("Map Columns")
+auto_map = suggest_mapping(df.columns)
+mapping: Dict[str, str] = {}
 
-# ---------- Column mapping ----------
-st.sidebar.header("2) Map Columns")
-suggested = suggest_mapping(df.columns.tolist())
+cols = st.columns(3)
+for i, role in enumerate(ROLES):
+    with cols[i % 3]:
+        # Preselect suggested column if available
+        suggested = auto_map.get(role)
+        index = 0
+        if suggested in df.columns:
+            index = list(df.columns).index(suggested) + 1  # +1 because "(None)" at index 0
 
-mapping: Dict[str, Optional[str]] = {}
-for role in ROLES:
-    mapping[role] = st.sidebar.selectbox(
-        f"{role} column",
-        options=["(none)"] + df.columns.tolist(),
-        index=(df.columns.tolist().index(suggested.get(role)) + 1) if suggested.get(role) in df.columns.tolist() else 0,
-        help=f"Select which column represents '{role}'"
-    )
-    if mapping[role] == "(none)":
-        mapping[role] = None
+        mapping[role] = st.selectbox(
+            f"{role} column",
+            options=["(None)"] + list(df.columns),
+            index=index
+        )
 
-if not validate_mapping(df, mapping):
+# Validate minimum mapping
+required = ["Module", "SubCategory", "Segment", "ProductName"]
+missing = [r for r in required if not mapping.get(r) or mapping.get(r) == "(None)"]
+if missing:
+    st.error(f"Please map required columns: {', '.join(missing)}")
     st.stop()
 
-# ---------- Main: Cascading filters ----------
-st.header("3) Select filters")
+# ---------- UI: Filtering ----------
+st.subheader("Filter & View")
+fdf, selection = chain_select(df, mapping)
 
-mod_col = mapping["Module"]
-sub_col = mapping["SubCategory"]
-seg_col = mapping["Segment"]
-prod_col = mapping["ProductName"]
+# ---------- Results Table ----------
+st.markdown("### Filtered Results")
+st.dataframe(fdf, use_container_width=True)
 
-# Module
-modules = sorted(df[mod_col].dropna().unique().tolist())
-sel_module = st.selectbox("Module", ["(All)"] + modules)
+# ---------- Export ----------
+c_exp1, c_exp2 = st.columns([1, 1])
+with c_exp1:
+    if st.button("Export filtered to CSV"):
+        csv_bytes = fdf.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download CSV",
+            data=csv_bytes,
+            file_name="filtered_results.csv",
+            mime="text/csv",
+        )
+with c_exp2:
+    if st.button("Export filtered to Excel"):
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            fdf.to_excel(writer, index=False, sheet_name="Filtered")
+        buffer.seek(0)
+        st.download        st.download_button(
+            "Download Excel",
+            data=buffer,
+            file_name="filtered_results.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
-df_mod = df if sel_module == "(All)" else df[df[mod_col] == sel_module]
-
-# Sub-Category
-subcats = sorted(df_mod[sub_col].dropna().unique().tolist())
-sel_subcat = st.selectbox("Sub-Category", ["(All)"] + subcats)
-
-df_sub = df_mod if sel_subcat == "(All)" else df_mod[df_mod[sub_col] == sel_subcat]
-
-# Segment
-segments = sorted(df_sub[seg_col].dropna().unique().tolist())
-sel_segment = st.selectbox("Segment", ["(All)"] + segments)
-
-df_seg = df_sub if sel_segment == "(All)" else df_sub[df_sub[seg_col] == sel_segment]
-
-# Product
-products = sorted(df_seg[prod_col].dropna().unique().tolist())
-sel_product = st.selectbox("Product", ["(All)"] + products)
-
-# Final filtered set
-filtered = df_seg if sel_product == "(All)" else df_seg[df_seg[prod_col] == sel_product]
-
-st.header("4) Results")
-st.caption(f"{len(filtered)} item(s)")
-
-if len(filtered) == 0:
-    st.warning("No products match the current filter.")
+# ---------- Product Viewer ----------
+if not fdf.empty:
+    st.markdown("---")
+    st.markdown("### Product Details")
+    # Show either the single selected product or a preview
+    prod_col = mapping.get("ProductName")
+    if selection.get("ProductName") and selection["ProductName"] != "(All)":
+        # Show the single selected product(s)
+        for _, row in fdf.iterrows():
+            show_product_card(row, mapping)
+    else:
+        # Show top 5 items to preview
+        for _, row in fdf.head(5).iterrows():
+            show_product_card(row, mapping)
 else:
-    cols = st.columns(3)
-    for i, (_, row) in enumerate(filtered.iterrows()):
-        with cols[i % 3]:
-            product_card(row, mapping)
-
-# ---------- Export buttons ----------
-with st.expander("⬇️ Export filtered data"):
-    st.download_button(
-        label="Download CSV",
-        data=filtered.to_csv(index=False).encode("utf-8"),
-        file_name="filtered_products.csv",
-        mime="text/csv"
-    )
-
-    # Export to Excel in-memory
-    from pandas import ExcelWriter
-    bio = io.BytesIO()
-    with ExcelWriter(bio, engine="openpyxl") as writer:
-        filtered.to_excel(writer, sheet_name="Filtered", index=False)
-    st.download_button(
-        label="Download Excel",
-        data=bio.getvalue(),
-        file_name="filtered_products.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spread        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
