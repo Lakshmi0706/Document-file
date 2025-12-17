@@ -34,35 +34,33 @@ ROLES = ["Module", "SubCategory", "Segment", "ProductName", "Definition", "Image
 
 
 # ---------- Helpers ----------
-def _excel_engine_from_ext(filename: str) -> str:
+def excel_engine_from_name(filename: str) -> str:
     ext = os.path.splitext(filename)[1].lower()
     return "xlrd" if ext == ".xls" else "openpyxl"
 
 
-@st.cache_data(show_spinner=False)
 def get_sheet_names(uploaded_file) -> list:
-    """Return sheet names from uploaded Excel."""
     if uploaded_file is None:
         return []
     name = getattr(uploaded_file, "name", "uploaded.xlsx")
-    engine = _excel_engine_from_ext(name)
-    xls = pd.ExcelFile(uploaded_file, engine=engine)
-    return xls.sheet_names
+    engine = excel_engine_from_name(name)
+
+    try:
+        xls = pd.ExcelFile(uploaded_file, engine=engine)
+        return xls.sheet_names
+    except Exception as e:
+        # common: xlrd not installed for .xls
+        raise RuntimeError(str(e))
 
 
-@st.cache_data(show_spinner=False)
 def load_excel(uploaded_file, sheet_name: Optional[str] = None) -> pd.DataFrame:
-    """
-    Load Excel (.xlsx via openpyxl, .xls via xlrd).
-    If sheet_name is provided, read that sheet; else first sheet.
-    """
     if uploaded_file is None:
         return pd.DataFrame()
 
-    try:
-        name = getattr(uploaded_file, "name", "uploaded.xlsx")
-        engine = _excel_engine_from_ext(name)
+    name = getattr(uploaded_file, "name", "uploaded.xlsx")
+    engine = excel_engine_from_name(name)
 
+    try:
         xls = pd.ExcelFile(uploaded_file, engine=engine)
         sheets = xls.sheet_names
         if not sheets:
@@ -74,16 +72,12 @@ def load_excel(uploaded_file, sheet_name: Optional[str] = None) -> pd.DataFrame:
         df = pd.read_excel(xls, sheet_name=sheet_name)
         df.columns = [str(c).strip() for c in df.columns]
         return df
-
     except Exception as e:
         st.error(f"Failed to read Excel: {e}")
         return pd.DataFrame()
 
 
 def suggest_mapping(df_cols):
-    """
-    Auto-suggest column mapping based on common names.
-    """
     lower = {str(c).lower(): str(c) for c in df_cols}
 
     def pick(*cands):
@@ -102,18 +96,29 @@ def suggest_mapping(df_cols):
     }
 
 
-@st.cache_data(show_spinner=False)
-def load_image(img_ref: str) -> Optional[Image.Image]:
+def clean_mapping(mapping: Dict[str, str]) -> Dict[str, Optional[str]]:
+    cleaned: Dict[str, Optional[str]] = {}
+    for k, v in mapping.items():
+        cleaned[k] = None if (v is None or v == "(None)") else v
+    return cleaned
+
+
+def load_image(img_ref: str, base_dir: Optional[str] = None) -> Optional[Image.Image]:
     """
-    Load image from URL or local path.
+    Supports:
+    - URL (http/https)
+    - Absolute local path
+    - Relative path resolved against base_dir (optional)
     """
-    if not img_ref or str(img_ref).strip() == "" or str(img_ref).lower() == "nan":
+    if img_ref is None:
         return None
 
     img_ref = str(img_ref).strip()
+    if img_ref == "" or img_ref.lower() == "nan":
+        return None
 
     try:
-        # URL image
+        # URL
         if img_ref.lower().startswith(("http://", "https://")):
             if not REQUESTS_AVAILABLE:
                 return None
@@ -121,9 +126,13 @@ def load_image(img_ref: str) -> Optional[Image.Image]:
             r.raise_for_status()
             return Image.open(io.BytesIO(r.content)).convert("RGB")
 
-        # Local image path
-        if os.path.exists(img_ref):
-            return Image.open(img_ref).convert("RGB")
+        # Local path (absolute or relative)
+        candidate = img_ref
+        if not os.path.isabs(candidate) and base_dir:
+            candidate = os.path.join(base_dir, candidate)
+
+        if os.path.exists(candidate):
+            return Image.open(candidate).convert("RGB")
 
     except Exception:
         return None
@@ -131,61 +140,50 @@ def load_image(img_ref: str) -> Optional[Image.Image]:
     return None
 
 
-def clean_mapping(mapping: Dict[str, str]) -> Dict[str, Optional[str]]:
-    """Convert '(None)' to None."""
-    cleaned = {}
-    for k, v in mapping.items():
-        cleaned[k] = None if (v is None or v == "(None)") else v
-    return cleaned
-
-
 def chain_select(df: pd.DataFrame, mapping: Dict[str, Optional[str]]):
     """
     Cascading dropdowns: Module -> SubCategory -> Segment -> ProductName
-    Returns filtered df + selection dict.
+    Returns filtered dataframe and selection dict.
     """
-    sel = {}
+    sel: Dict[str, str] = {}
 
-    def _options(col):
+    def options_for(col: str):
         vals = df[col].dropna().astype(str).unique().tolist()
         vals = sorted(vals)
         return ["(All)"] + vals
 
     # Module
-    if mapping.get("Module") in df.columns:
+    if mapping.get("Module") and mapping["Module"] in df.columns:
         col = mapping["Module"]
-        sel["Module"] = st.selectbox("Module", _options(col), index=0)
+        sel["Module"] = st.selectbox("Module", options_for(col), index=0)
         if sel["Module"] != "(All)":
             df = df[df[col].astype(str) == sel["Module"]]
 
     # SubCategory
-    if mapping.get("SubCategory") in df.columns:
+    if mapping.get("SubCategory") and mapping["SubCategory"] in df.columns:
         col = mapping["SubCategory"]
-        sel["SubCategory"] = st.selectbox("Sub-Category", _options(col), index=0)
+        sel["SubCategory"] = st.selectbox("Sub-Category", options_for(col), index=0)
         if sel["SubCategory"] != "(All)":
             df = df[df[col].astype(str) == sel["SubCategory"]]
 
     # Segment
-    if mapping.get("Segment") in df.columns:
+    if mapping.get("Segment") and mapping["Segment"] in df.columns:
         col = mapping["Segment"]
-        sel["Segment"] = st.selectbox("Segment", _options(col), index=0)
+        sel["Segment"] = st.selectbox("Segment", options_for(col), index=0)
         if sel["Segment"] != "(All)":
             df = df[df[col].astype(str) == sel["Segment"]]
 
-    # Product
-    if mapping.get("ProductName") in df.columns:
+    # ProductName
+    if mapping.get("ProductName") and mapping["ProductName"] in df.columns:
         col = mapping["ProductName"]
-        sel["ProductName"] = st.selectbox("Product", _options(col), index=0)
+        sel["ProductName"] = st.selectbox("Product", options_for(col), index=0)
         if sel["ProductName"] != "(All)":
             df = df[df[col].astype(str) == sel["ProductName"]]
 
     return df, sel
 
 
-def show_product_card(row: pd.Series, mapping: Dict[str, Optional[str]]):
-    """
-    Display image + definition.
-    """
+def show_product_card(row: pd.Series, mapping: Dict[str, Optional[str]], base_dir: Optional[str] = None):
     prod_col = mapping.get("ProductName")
     def_col = mapping.get("Definition")
     img_col = mapping.get("Image")
@@ -195,8 +193,9 @@ def show_product_card(row: pd.Series, mapping: Dict[str, Optional[str]]):
     img_ref = str(row.get(img_col, "")) if img_col else ""
 
     c1, c2 = st.columns([1, 2])
+
     with c1:
-        img = load_image(img_ref)
+        img = load_image(img_ref, base_dir=base_dir)
         if img:
             st.image(img, caption=product or "Image", use_container_width=True)
         else:
@@ -218,11 +217,18 @@ if uploaded_file is None:
     st.warning("Please upload an Excel file to begin.")
     st.stop()
 
-# ---------- UI: Sheet selection ----------
+# Optional: base directory for relative image paths (useful if you deploy with an /images folder)
+base_dir = st.text_input("Base folder for relative image paths (optional)", value="")
+
+# ---------- UI: Sheet Selection ----------
 try:
     sheets = get_sheet_names(uploaded_file)
 except Exception as e:
-    st.error(f"Could not read sheet names: {e}")
+    msg = str(e)
+    if "xlrd" in msg.lower():
+        st.error("This looks like a .xls file. Please install xlrd (pip install xlrd) or upload .xlsx instead.")
+    else:
+        st.error(f"Could not read Excel: {e}")
     st.stop()
 
 if not sheets:
@@ -238,28 +244,28 @@ if df.empty:
 
 st.success(f"Loaded {df.shape[0]} rows and {df.shape[1]} columns.")
 
-# ---------- UI: Column mapping ----------
+# ---------- UI: Column Mapping ----------
 st.subheader("🧩 Map Columns")
 auto_map = suggest_mapping(df.columns)
-mapping = {}
 
+mapping_raw: Dict[str, str] = {}
 cols = st.columns(3)
+
 for i, role in enumerate(ROLES):
     with cols[i % 3]:
         suggested = auto_map.get(role)
-        idx = 0
+        index = 0
         if suggested in df.columns:
-            idx = list(df.columns).index(suggested) + 1  # +1 because "(None)" at index 0
+            index = list(df.columns).index(suggested) + 1  # +1 because "(None)" at index 0
 
-        mapping[role] = st.selectbox(
+        mapping_raw[role] = st.selectbox(
             f"{role} column",
             options=["(None)"] + list(df.columns),
-            index=idx
+            index=index
         )
 
-mapping = clean_mapping(mapping)
+mapping = clean_mapping(mapping_raw)
 
-# Validate minimum required mapping
 required = ["Module", "SubCategory", "Segment", "ProductName"]
 missing = [r for r in required if not mapping.get(r)]
 if missing:
@@ -274,46 +280,45 @@ fdf, selection = chain_select(df, mapping)
 st.markdown("### 📄 Filtered Results")
 st.dataframe(fdf, use_container_width=True)
 
-# ---------- Export ----------
+# ---------- Export (SAFE: no extra st.button needed) ----------
 st.markdown("### ⬇️ Export Filtered Data")
 
-c_exp1, c_exp2 = st.columns([1, 1])
+csv_bytes = fdf.to_csv(index=False).encode("utf-8")
 
-with c_exp1:
-    if st.button("Export filtered to CSV"):
-        csv_bytes = fdf.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="Download CSV",
-            data=csv_bytes,
-            file_name="filtered_results.csv",
-            mime="text/csv",
-        )
+excel_buffer = io.BytesIO()
+with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+    fdf.to_excel(writer, index=False, sheet_name="Filtered")
+excel_buffer.seek(0)
 
-with c_exp2:
-    if st.button("Export filtered to Excel"):
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-            fdf.to_excel(writer, index=False, sheet_name="Filtered")
-        buffer.seek(0)
-        st.download_button(
-            label="Download Excel",
-            data=buffer,
-            file_name="filtered_results.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+c1, c2 = st.columns(2)
+with c1:
+    st.download_button(
+        label="Download CSV",
+        data=csv_bytes,
+        file_name="filtered_results.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+with c2:
+    st.download_button(
+        label="Download Excel",
+        data=excel_buffer,
+        file_name="filtered_results.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
 
-# ---------- Product viewer ----------
+# ---------- Product Viewer ----------
 st.markdown("---")
 st.markdown("## 🧾 Product Details")
 
 if fdf.empty:
     st.info("No rows match the current filters.")
 else:
-    # If a specific product is selected, show all matching rows
     if selection.get("ProductName") and selection["ProductName"] != "(All)":
         for _, row in fdf.iterrows():
-            show_product_card(row, mapping)
+            show_product_card(row, mapping, base_dir=base_dir or None)
     else:
-        # Otherwise show a preview of first 5
         st.info("Showing preview (top 5). Select a specific Product to view one item.")
-        for _,        for _, row in fdf.head(5).iterrows():
+        for _, row in fdf.head(5).iterrows():
+            show_product_card(row, mapping, base_dir=base
