@@ -1,62 +1,158 @@
 
 # app.py
-# ------------------------------------------------------------
-# Streamlit Image Loader & Annotator with Optional GitHub Push
-# ------------------------------------------------------------
-# Features:
-# - Multi-image upload and preview
-# - Metadata extraction (format, width, height) + optional EXIF
-# - Per-image tags and notes
-# - Local persistence to data/annotations.csv
-# - Optional: Save uploaded images locally (data/uploads) or push to GitHub
-# - Filter & export annotations (CSV/JSON)
-# ------------------------------------------------------------
-
-import os
+# --------------------------------------------------------------------
+# Product Catalog Viewer for Excel (Module → Sub-Category → Segment)
+# Shows product image + definition based on selections.
+import os# Supports: local image paths or URLs in Excel.
 import io
-import base64
-from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import streamlit as st
 import pandas as pd
 from PIL import Image
 
-# -------------- App Config --------------
-st.set_page_config(page_title="Image Loader & Annotator", layout="wide")
-st.title("🖼️ Image Loader & Annotator")
-st.caption("Upload images, view metadata, tag/annotate, and persist locally or to GitHub.")
+# Optional: fetch images from URLs (if Image column contains URLs)
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except Exception:
+    REQUESTS_AVAILABLE = False
 
-# -------------- Paths --------------
+# ---------------------- App Config ----------------------
+st.set_page_config(page_title="Product Catalog (Excel → Streamlit)", layout="wide")
+st.title("📘 Product Catalog Viewer")
+st.caption("Select Module → Sub-Category → Segment to see product image and definition. Upload your Excel or use the default.")
+
+# ---------------------- Paths --------------------------
 DATA_DIR = "data"
-UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
-ANNOTATIONS_PATH = os.path.join(DATA_DIR, "annotations.csv")
+DEFAULT_XLSX_PATH = os.path.join(DATA_DIR, "products.xlsx")
 os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# -------------- Sidebar Controls --------------
-st.sidebar.header("Controls")
+# ---------------------- Helpers ------------------------
+REQUIRED_ROLES = ["Module", "SubCategory", "Segment", "ProductName", "Definition", "Image"]
 
-persist_files_local = st.sidebar.checkbox("Save uploaded files to disk", value=True)
-enable_exif = st.sidebar.checkbox("Extract EXIF (if available)", value=False)
+def load_excel(source) -> pd.DataFrame:
+    """
+    Load Excel file from uploader or local default path.
+    Ensures we use openpyxl engine for .xlsx.
+    """
+    try:
+        if source is None and os.path.exists(DEFAULT_XLSX_PATH):
+            df = pd.read_excel(DEFAULT_XLSX_PATH, engine="openpyxl")
+        elif source is not None:
+            df = pd.read_excel(source, engine="openpyxl")
+        else:
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Failed to load Excel: {e}")
+        return pd.DataFrame()
 
-default_tags = st.sidebar.text_input("Default tags (comma-separated)", "")
-default_notes = st.sidebar.text_area("Default notes", "")
-
-st.sidebar.divider()
-st.sidebar.subheader("GitHub (optional)")
-st.sidebar.caption("Fill these to push uploads + annotations to GitHub.")
-gh_owner = st.sidebar.text_input("Owner/org", value=st.secrets.get("github_owner", ""))
-gh_repo = st.sidebar.text_input("Repository", value=st.secrets.get("github_repo", ""))
-gh_branch = st.sidebar.text_input("Branch", value=st.secrets.get("github_branch", "main"))
-gh_target_dir = st.sidebar.text_input("Repo path for uploads", value=st.secrets.get("github_upload_dir", "data/uploads"))
-gh_token = st.secrets.get("github_token", "")
-
-push_to_github = st.sidebar.checkbox("Push uploads & annotations to GitHub", value=bool(gh_token and gh_owner and gh_repo))
-
-st.sidebar.divider()
-st.sidebar.caption("Tip: You can batch-upload images and annotate each one.")
+    # Normalize column names (strip, unify spaces)
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
 
 
-# -------------- Helper Functions --------------
+def suggest_mapping(df_cols: List[str]) -> Dict[str, Optional[str]]:
+    """
+    Suggest column mapping by simple keyword matching.
+    You can override in the UI.
+    """
+    lower_cols = {c.lower(): c for c in df_cols}
+    def pick(*candidates):
+        for cand in candidates:
+            if cand in lower_cols:
+                return lower_cols[cand]
+        return None
+
+    return {
+        "Module":       pick("module", "category", "division"),
+        "SubCategory":  pick("subcategory", "sub_category", "sub cat", "subcat"),
+        "Segment":      pick("segment", "subsegment", "sub_segment"),
+        "ProductName":  pick("productname", "product_name", "name", "item", "sku"),
+        "Definition":   pick("definition", "description", "details", "spec"),
+        "Image":        pick("image", "imagepath", "image_path", "picture", "imageurl", "image_url", "img"),
+    }
+
+
+def read_image(path_or_url: str) -> Optional[Image.Image]:
+    """
+    Read image from local path or remote URL.
+    Returns a PIL Image or None if fails.
+    """
+    if not path_or_url:
+        return None
+
+    path_or_url = str(path_or_url).strip()
+
+    # URL case
+    if path_or_url.lower().startswith(("http://", "https://")):
+        if not REQUESTS_AVAILABLE:
+            st.warning("requests not available; cannot fetch URL images. Add `requests` to requirements.")
+            return None
+        try:
+            resp = requests.get(path_or_url, timeout=10)
+            resp.raise_for_status()
+            return Image.open(io.BytesIO(resp.content))
+        except Exception:
+            return None
+    else:
+        # Local file case (relative to app root)
+        if not os.path.isabs(path_or_url):
+            path_or_url = os.path.join(os.getcwd(), path_or_url)
+        if not os.path.exists(path_or_url):
+            return None
+        try:
+            return Image.open(path_or_url)
+        except Exception:
+            return None
+
+
+def validate_mapping(df: pd.DataFrame, mapping: Dict[str, str]) -> bool:
+    missing = [role for role, col in mapping.items() if not col or col not in df.columns]
+    if missing:
+        st.error(f"Missing mapped columns for: {', '.join(missing)}")
+        return False
+    return True
+
+
+def cascade_unique(df: pd.DataFrame, mapping: Dict[str, str]) -> Dict[str, List[str]]:
+    """
+    Return unique values for each level to populate dropdowns.
+    """
+    mod_col = mapping["Module"]
+    sub_col = mapping["SubCategory"]
+    seg_col = mapping["Segment"]
+
+    return {
+        "modules": sorted([x for x in df[mod_col].dropna().unique()]),
+        "subcats": sorted([x for x in df[sub_col].dropna().unique()]),
+        "segments": sorted([x for x in df[seg_col].dropna().unique()]),
+    }
+
+
+def render_product_card(row, mapping: Dict[str, str]):
+    """
+    Render one product card with image + definition.
+    """
+    prod = str(row.get(mapping["ProductName"], ""))
+    definition = str(row.get(mapping["Definition"], ""))
+    image_ref = str(row.get(mapping["Image"], ""))
+
+    with st.container(border=True):
+        cols = st.columns([1, 2])
+        with cols[0]:
+            img = read_image(image_ref)
+            if img:
+                st.image(img, use_column_width=True)
+            else:
+                st.info("No image / failed to load")
+        with cols[1]:
+            st.subheader(prod if prod else "Unnamed product")
+            st.markdown(f"**Definition:** {definition}" if definition else "_No definition provided_")
+
+            # Show raw refs if needed
+            with st.expander("Source fields"):
+                st.code(f"Image: {image_ref}")
+
+# --------------------------------------------------------------------
 
