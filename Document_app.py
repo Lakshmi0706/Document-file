@@ -4,7 +4,7 @@ import pandas as pd
 # Page setup
 st.set_page_config(page_title="Product Selector", layout="centered")
 
-# Custom CSS for beauty
+# Custom CSS for better look and full-width dropdowns
 st.markdown("""
 <style>
     .big-font {
@@ -19,12 +19,28 @@ st.markdown("""
         font-weight: bold;
         color: #1B4F72;
         margin-bottom: 5px;
+        text-align: center;
+    }
+    /* Make dropdowns full width and show long text */
+    .stSelectbox > div > div > select {
+        width: 100% !important;
+    }
+    .stSelectbox > div > div {
+        width: 100% !important;
     }
     .product-info {
-        font-size: 18px;
+        font-size: 20px;
         line-height: 1.6;
-        margin-top: 30px;
+        margin: 30px 0;
         text-align: center;
+        font-weight: bold;
+    }
+    .definition-text {
+        font-size: 18px;
+        margin: 20px 0;
+        text-align: center;
+        font-style: italic;
+        color: #34495E;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -46,7 +62,7 @@ try:
     
     df = df.dropna(subset=['Department', 'Super category', 'Category', 'Subcategory', 'Segment'])
 
-    # Horizontal dropdowns using columns
+    # Horizontal dropdowns (equal width, full text visible)
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
@@ -86,30 +102,30 @@ try:
     else:
         row = result.iloc[0]
 
-        # Centered large image
+        # Definition first (above image)
+        definition = row.get('Definition', None)
+        if pd.notna(definition) and str(definition).strip():
+            st.markdown('<div class="definition-text">', unsafe_allow_html=True)
+            st.write(definition)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # Large centered image
         image_url = row['Image']
         if pd.notna(image_url):
             image_url = str(image_url).strip()
             if image_url.startswith('http'):
-                st.markdown("<div style='text-align: center; margin-top: 30px;'>", unsafe_allow_html=True)
-                st.image(image_url, width=600)  # Larger image, adjust if needed (500-700)
+                st.markdown("<div style='text-align: center; margin: 30px 0;'>", unsafe_allow_html=True)
+                st.image(image_url, width=600)  # Big and clear
                 st.markdown("</div>", unsafe_allow_html=True)
 
-        # Product info
-        st.markdown('<div class="product-info">', unsafe_allow_html=True)
-
+        # Link below image
         link = row['Link']
         if pd.notna(link):
             link = str(link).strip()
             if link:
+                st.markdown('<div class="product-info">', unsafe_allow_html=True)
                 st.markdown(f"*Product Link:* [{link}]({link})")
-
-        definition = row.get('Definition', None)
-        if pd.notna(definition) and str(definition).strip():
-            st.markdown("*Definition:*")
-            st.write(definition)
-
-        st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
 except Exception as e:
     st.error(f"Error loading data: {str(e)}")
