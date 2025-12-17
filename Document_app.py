@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
 
-# Page config for better look
+# Page setup
 st.set_page_config(page_title="Product Selector", layout="centered")
 
-# Custom CSS for beautiful fonts, spacing, and image sizing
+# Custom CSS for beauty
 st.markdown("""
 <style>
     .big-font {
@@ -12,25 +12,24 @@ st.markdown("""
         font-weight: bold;
         color: #2E86C1;
         text-align: center;
-        margin-bottom: 30px;
+        margin-bottom: 40px;
     }
     .select-label {
-        font-size: 20px !important;
+        font-size: 18px !important;
         font-weight: bold;
         color: #1B4F72;
+        margin-bottom: 5px;
     }
     .product-info {
         font-size: 18px;
         line-height: 1.6;
-        margin-top: 20px;
-    }
-    .stSelectbox > div > div {
-        font-size: 18px;
+        margin-top: 30px;
+        text-align: center;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Title with custom style
+# Title
 st.markdown('<p class="big-font">Product Selector</p>', unsafe_allow_html=True)
 
 EXCEL_FILE = "TRAIL DOC.xlsx"
@@ -47,26 +46,33 @@ try:
     
     df = df.dropna(subset=['Department', 'Super category', 'Category', 'Subcategory', 'Segment'])
 
-    # Dropdowns with custom labels
-    st.markdown('<p class="select-label">Select Department</p>', unsafe_allow_html=True)
-    departments = sorted(df['Department'].unique())
-    selected_dept = st.selectbox("", departments, label_visibility="collapsed")
+    # Horizontal dropdowns using columns
+    col1, col2, col3, col4, col5 = st.columns(5)
 
-    st.markdown('<p class="select-label">Select Super Category</p>', unsafe_allow_html=True)
-    super_cats = sorted(df[df['Department'] == selected_dept]['Super category'].unique())
-    selected_super = st.selectbox("", super_cats, label_visibility="collapsed")
+    with col1:
+        st.markdown('<p class="select-label">Department</p>', unsafe_allow_html=True)
+        departments = sorted(df['Department'].unique())
+        selected_dept = st.selectbox("", departments, key="dept", label_visibility="collapsed")
 
-    st.markdown('<p class="select-label">Select Category</p>', unsafe_allow_html=True)
-    categories = sorted(df[(df['Department'] == selected_dept) & (df['Super category'] == selected_super)]['Category'].unique())
-    selected_cat = st.selectbox("", categories, label_visibility="collapsed")
+    with col2:
+        st.markdown('<p class="select-label">Super Category</p>', unsafe_allow_html=True)
+        super_cats = sorted(df[df['Department'] == selected_dept]['Super category'].unique())
+        selected_super = st.selectbox("", super_cats, key="super", label_visibility="collapsed")
 
-    st.markdown('<p class="select-label">Select Subcategory</p>', unsafe_allow_html=True)
-    subcats = sorted(df[(df['Department'] == selected_dept) & (df['Super category'] == selected_super) & (df['Category'] == selected_cat)]['Subcategory'].unique())
-    selected_subcat = st.selectbox("", subcats, label_visibility="collapsed")
+    with col3:
+        st.markdown('<p class="select-label">Category</p>', unsafe_allow_html=True)
+        categories = sorted(df[(df['Department'] == selected_dept) & (df['Super category'] == selected_super)]['Category'].unique())
+        selected_cat = st.selectbox("", categories, key="cat", label_visibility="collapsed")
 
-    st.markdown('<p class="select-label">Select Segment</p>', unsafe_allow_html=True)
-    segments = sorted(df[(df['Department'] == selected_dept) & (df['Super category'] == selected_super) & (df['Category'] == selected_cat) & (df['Subcategory'] == selected_subcat)]['Segment'].unique())
-    selected_segment = st.selectbox("", segments, label_visibility="collapsed")
+    with col4:
+        st.markdown('<p class="select-label">Subcategory</p>', unsafe_allow_html=True)
+        subcats = sorted(df[(df['Department'] == selected_dept) & (df['Super category'] == selected_super) & (df['Category'] == selected_cat)]['Subcategory'].unique())
+        selected_subcat = st.selectbox("", subcats, key="subcat", label_visibility="collapsed")
+
+    with col5:
+        st.markdown('<p class="select-label">Segment</p>', unsafe_allow_html=True)
+        segments = sorted(df[(df['Department'] == selected_dept) & (df['Super category'] == selected_super) & (df['Category'] == selected_cat) & (df['Subcategory'] == selected_subcat)]['Segment'].unique())
+        selected_segment = st.selectbox("", segments, key="seg", label_visibility="collapsed")
 
     # Result
     result = df[(df['Department'] == selected_dept) &
@@ -80,16 +86,16 @@ try:
     else:
         row = result.iloc[0]
 
-        # Centered and resized image (max 600px height to fit screen better)
+        # Centered large image
         image_url = row['Image']
         if pd.notna(image_url):
             image_url = str(image_url).strip()
             if image_url.startswith('http'):
-                st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
-                st.image(image_url, caption="Product Image", width=500)  # Adjust width as needed (400-600 looks great)
+                st.markdown("<div style='text-align: center; margin-top: 30px;'>", unsafe_allow_html=True)
+                st.image(image_url, width=600)  # Larger image, adjust if needed (500-700)
                 st.markdown("</div>", unsafe_allow_html=True)
 
-        # Product info with nice formatting
+        # Product info
         st.markdown('<div class="product-info">', unsafe_allow_html=True)
 
         link = row['Link']
