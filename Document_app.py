@@ -1,33 +1,66 @@
 import streamlit as st
 import pandas as pd
 
-# Load the Excel file
-# Assume the Excel file is named 'data.xlsx' and is in the same directory
-# Columns: 'Module', 'Subcategory', 'Segment', 'Image_URL', 'Link'
-df = pd.read_excel('data.xlsx')
+# App title
+st.title("Product Selector")
 
-# Get unique modules
-modules = df['Module'].unique()
+# Load the Excel file (update the name to match exactly what you uploaded)
+EXCEL_FILE = "TRAIL DOC.xlsx"
 
-# Streamlit app
-st.title('Product Selector')
+try:
+    # Read the Excel file
+    df = pd.read_excel(EXCEL_FILE)
 
-# Select Module
-selected_module = st.selectbox('Select Module', modules)
+    # Remove any completely empty rows
+    df = df.dropna(how='all')
 
-# Filter subcategories based on selected module
-subcats = df[df['Module'] == selected_module]['Subcategory'].unique()
-selected_subcat = st.selectbox('Select Subcategory', subcats)
+    # Check if required columns exist
+    required_columns = ['Module', 'Subcategory', 'Segment', 'Image_URL', 'Link']
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    
+    if missing_cols:
+        st.error(f"The Excel file is missing these required columns: {', '.join(missing_cols)}")
+        st.stop()
 
-# Filter segments based on selected module and subcat
-segments = df[(df['Module'] == selected_module) & (df['Subcategory'] == selected_subcat)]['Segment'].unique()
-selected_segment = st.selectbox('Select Segment', segments)
+    # Get unique values, removing NaN
+    modules = df['Module'].dropna().unique()
+    if len(modules) == 0:
+        st.warning("No data found in the 'Module' column.")
+        st.stop()
 
-# Get the row for the selected combination
-selected_row = df[(df['Module'] == selected_module) & 
-                  (df['Subcategory'] == selected_subcat) & 
-                  (df['Segment'] == selected_segment)].iloc[0]
+    # Select Module
+    selected_module = st.selectbox("Select Module", sorted(modules))
 
-# Display image and link
-st.image(selected_row['Image_URL'], caption='Product Image')
-st.write('Link:', selected_row['Link'])
+    # Filter Subcategory
+    subcats = df[df['Module'] == selected_module]['Subcategory'].dropna().unique()
+    selected_subcat = st.selectbox("Select Subcategory", sorted(subcats))
+
+    # Filter Segment
+    segments = df[(df['Module'] == selected_module) & 
+                  (df['Subcategory'] == selected_subcat)]['Segment'].dropna().unique()
+    selected_segment = st.selectbox("Select Segment", sorted(segments))
+
+    # Find the matching row
+    result = df[(df['Module'] == selected_module) &
+                (df['Subcategory'] == selected_subcat) &
+                (df['Segment'] == selected_segment)]
+
+    if result.empty:
+        st.warning("No product found for this combination.")
+    else:
+        row = result.iloc[0]
+
+        # Display Product Image
+        st.image(row['Image_URL'], caption="Product Image", use_column_width=True)
+
+        # Display Product Link
+        link = row['Link']
+        if pd.notna(link) and str(link).strip() != "":
+            st.markdown(f"*Product Link:* [{link}]({link})")
+        else:
+            st.info("No link provided for this product.")
+
+except FileNotFoundError:
+    st.error(f"File '{EXCEL_FILE}' not found. Make sure the Excel file is uploaded to the repository with the exact name.")
+except Exception as e:
+    st.error(f"An error occurred while loading the data: {str(e)}")
