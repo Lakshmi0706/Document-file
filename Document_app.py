@@ -1,65 +1,49 @@
 import streamlit as st
 import pandas as pd
 
-# Page setup
 st.set_page_config(page_title="Product Selector", layout="centered")
 
-# Custom CSS - wider dropdowns + full text support
+# Modern compact CSS
 st.markdown("""
 <style>
     .big-font {
-        font-size: 50px !important;
+        font-size: 42px !important;
         font-weight: bold;
-        color: #2E86C1;
+        color: #1E88E5;
         text-align: center;
-        margin-bottom: 40px;
+        margin-bottom: 30px;
     }
-    .select-label {
-        font-size: 18px !important;
+    .label-style {
+        font-size: 16px !important;
         font-weight: bold;
-        color: #1B4F72;
-        margin-bottom: 5px;
+        color: #424242;
         text-align: center;
+        margin-bottom: 8px;
     }
-    /* Wider columns for dropdowns */
-    .block-container {
-        padding-top: 2rem;
-    }
-    /* Make each selectbox wider and show full text */
-    div.row-widget.stSelectbox {
-        min-width: 200px !important;
-    }
+    /* Make dropdowns compact and show full text */
     .stSelectbox > div > div {
         width: 100% !important;
     }
     select {
-        width: 100% !important;
-        white-space: normal !important;
+        font-size: 15px !important;
+        padding: 8px !important;
     }
-    .product-info {
-        font-size: 20px;
-        line-height: 1.6;
-        margin: 20px 0;
-        text-align: center;
-        font-weight: bold;
-    }
-    .definition-text {
+    .definition {
         font-size: 18px;
-        margin: 20px 0;
         text-align: center;
+        margin: 20px 0;
+        color: #2c3e50;
         font-style: italic;
-        color: #34495E;
     }
     .default-values {
         font-size: 16px;
-        margin: 15px 0;
         text-align: center;
-        color: #27AE60;
+        color: #27ae60;
+        margin: 15px 0;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Title
 st.markdown('<p class="big-font">Product Selector</p>', unsafe_allow_html=True)
 
 EXCEL_FILE = "TRAIL DOC.xlsx"
@@ -67,44 +51,33 @@ EXCEL_FILE = "TRAIL DOC.xlsx"
 try:
     df = pd.read_excel(EXCEL_FILE)
     df = df.dropna(how='all')
-    
-    required_columns = ['Department', 'Super category', 'Category', 'Subcategory', 'Segment', 'Image', 'Link']
-    missing_cols = [col for col in required_columns if col not in df.columns]
-    if missing_cols:
-        st.error(f"Missing columns: {', '.join(missing_cols)}")
-        st.stop()
-    
     df = df.dropna(subset=['Department', 'Super category', 'Category', 'Subcategory', 'Segment'])
 
-    # Wider horizontal dropdowns (more space per column)
-    col1, spacer1, col2, spacer2, col3, spacer3, col4, spacer4, col5 = st.columns([1.5, 0.2, 1.5, 0.2, 1.5, 0.2, 1.5, 0.2, 1.5])
+    # Compact horizontal layout with equal spacing
+    cols = st.columns(5)
 
-    with col1:
-        st.markdown('<p class="select-label">Department</p>', unsafe_allow_html=True)
-        departments = sorted(df['Department'].unique())
-        selected_dept = st.selectbox("", departments, key="dept", label_visibility="collapsed")
+    labels = ["Department", "Super Category", "Category", "Subcategory", "Segment"]
+    selections = []
 
-    with col2:
-        st.markdown('<p class="select-label">Super Category</p>', unsafe_allow_html=True)
-        super_cats = sorted(df[df['Department'] == selected_dept]['Super category'].unique())
-        selected_super = st.selectbox("", super_cats, key="super", label_visibility="collapsed")
+    for i, label in enumerate(labels):
+        with cols[i]:
+            st.markdown(f'<p class="label-style">{label}</p>', unsafe_allow_html=True)
+            unique_vals = sorted(df[label.replace(" ", "_") if " " in label else label].unique())
+            if i == 0:
+                selected = st.selectbox("", unique_vals, key="0", label_visibility="collapsed")
+            else:
+                # Filter based on previous selections
+                filtered = df
+                for j in range(i):
+                    col_name = labels[j].replace(" ", "_") if " " in labels[j] else labels[j]
+                    filtered = filtered[filtered[col_name] == selections[j]]
+                unique_vals = sorted(filtered[label.replace(" ", "_") if " " in label else label].unique())
+                selected = st.selectbox("", unique_vals, key=str(i), label_visibility="collapsed")
+            selections.append(selected)
 
-    with col3:
-        st.markdown('<p class="select-label">Category</p>', unsafe_allow_html=True)
-        categories = sorted(df[(df['Department'] == selected_dept) & (df['Super category'] == selected_super)]['Category'].unique())
-        selected_cat = st.selectbox("", categories, key="cat", label_visibility="collapsed")
+    selected_dept, selected_super, selected_cat, selected_subcat, selected_segment = selections
 
-    with col4:
-        st.markdown('<p class="select-label">Subcategory</p>', unsafe_allow_html=True)
-        subcats = sorted(df[(df['Department'] == selected_dept) & (df['Super category'] == selected_super) & (df['Category'] == selected_cat)]['Subcategory'].unique())
-        selected_subcat = st.selectbox("", subcats, key="subcat", label_visibility="collapsed")
-
-    with col5:
-        st.markdown('<p class="select-label">Segment</p>', unsafe_allow_html=True)
-        segments = sorted(df[(df['Department'] == selected_dept) & (df['Super category'] == selected_super) & (df['Category'] == selected_cat) & (df['Subcategory'] == selected_subcat)]['Segment'].unique())
-        selected_segment = st.selectbox("", segments, key="seg", label_visibility="collapsed")
-
-    # Result
+    # Find product
     result = df[(df['Department'] == selected_dept) &
                 (df['Super category'] == selected_super) &
                 (df['Category'] == selected_cat) &
@@ -112,20 +85,18 @@ try:
                 (df['Segment'] == selected_segment)]
 
     if result.empty:
-        st.warning("No product found for this selection.")
+        st.info("No product found for this selection.")
     else:
         row = result.iloc[0]
 
         # Definition
-        definition = row.get('Definition', None)
-        if pd.notna(definition) and str(definition).strip():
-            st.markdown('<div class="definition-text">', unsafe_allow_html=True)
-            st.write(definition)
-            st.markdown('</div>', unsafe_allow_html=True)
+        definition = row.get('Definition')
+        if pd.notna(definition):
+            st.markdown(f'<div class="definition">{definition}</div>', unsafe_allow_html=True)
 
         # Default values
-        default_sub = row.get('Default values subcategory', None)
-        default_seg = row.get('Default values segment', None)
+        default_sub = row.get('Default values subcategory')
+        default_seg = row.get('Default values segment')
         if pd.notna(default_sub) or pd.notna(default_seg):
             st.markdown('<div class="default-values">', unsafe_allow_html=True)
             st.markdown("*Default Values:*")
@@ -135,23 +106,19 @@ try:
                 st.write(f"• Segment: {default_seg}")
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # Image (450px - fits perfectly)
+        # Image (medium size, centered)
         image_url = row['Image']
-        if pd.notna(image_url):
-            image_url = str(image_url).strip()
-            if image_url.startswith('http'):
-                st.markdown("<div style='text-align: center; margin: 20px 0;'>", unsafe_allow_html=True)
-                st.image(image_url, width=450)
-                st.markdown("</div>", unsafe_allow_html=True)
+        if pd.notna(image_url) and str(image_url).strip().startswith('http'):
+            st.markdown("<div style='text-align: center; margin: 25px 0;'>", unsafe_allow_html=True)
+            st.image(str(image_url).strip(), width=500)
+            st.markdown("</div>", unsafe_allow_html=True)
 
         # Link
         link = row['Link']
         if pd.notna(link):
-            link = str(link).strip()
-            if link:
-                st.markdown('<div class="product-info">', unsafe_allow_html=True)
-                st.markdown(f"*Product Link:* [{link}]({link})")
-                st.markdown('</div>', unsafe_allow_html=True)
+            link_str = str(link).strip()
+            if link_str:
+                st.markdown(f"<div style='text-align: center; font-size: 18px;'><strong>Product Link:</strong> <a href='{link_str}' target='_blank'>{link_str}</a></div>", unsafe_allow_html=True)
 
 except Exception as e:
-    st.error(f"Error loading data: {str(e)}")
+    st.error("Error loading data. Check Excel file and column names.")
